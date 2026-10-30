@@ -1,0 +1,38 @@
+{
+  "name": "@499apps/games-kit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared toolkit for 499apps Games: theme, renderer, audio, input, storage, left-rail menu, service-worker tooling, CI scripts.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "scan:secrets": "node src/scripts/scan-secrets.mjs",
+    "icons": "node src/scripts/gen-icons.mjs --variant hub --out public/icons --favicon public/favicon.svg",
+    "ci:local": "node src/scripts/ci-local.mjs --no-build --no-e2e"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.20.0",
+    "@playwright/test": "^1.50.0",
+    "@types/node": "^22.13.0",
+    "@types/three": "^0.170.0",
+    "eslint": "^9.20.0",
+    "eslint-config-prettier": "^10.0.1",
+    "fast-check": "^3.23.1",
+    "globals": "^15.14.0",
+    "prettier": "^3.5.0",
+    "three": "^0.170.0",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.24.0",
+    "vite": "^6.1.0",
+    "vitest": "^3.0.5"
+  }
+}
