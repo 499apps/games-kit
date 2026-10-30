@@ -121,14 +121,55 @@ function coloringArt(maskable) {
   return shapes;
 }
 
+function moonArt(maskable) {
+  const k = maskable ? 0.8 : 1;
+  const c = (v) => 0.5 + (v - 0.5) * k;
+  const s = (v) => v * k;
+  const shapes = [
+    // Deep navy night sky with a soft gloss.
+    rrect(0, 0, 1, 1, maskable ? 0 : 0.21, gradient([0, 0], [1, 1], '#1a2a66', '#0a0f2c')),
+    rrect(0.04, 0.04, 0.92, 0.42, maskable ? 0.1 : 0.18, P.white, 0.05),
+  ];
+  // Stars.
+  for (const [x, y, r] of [
+    [0.2, 0.18, 0.014],
+    [0.82, 0.16, 0.011],
+    [0.86, 0.4, 0.009],
+    [0.13, 0.44, 0.01],
+    [0.68, 0.09, 0.008],
+  ]) {
+    shapes.push(circle(c(x), c(y), s(r), P.cream, 0.9));
+  }
+  // Grey moon below, with craters.
+  shapes.push(circle(c(0.5), c(1.12), s(0.48), gradient([0.25, 0.64], [0.8, 1], '#e3e5ee', '#8d92aa')));
+  shapes.push(circle(c(0.3), c(0.8), s(0.055), '#a4a9bf'));
+  shapes.push(circle(c(0.66), c(0.74), s(0.04), '#a4a9bf'));
+  shapes.push(circle(c(0.52), c(0.9), s(0.065), '#9aa0b8'));
+  // Lander: legs and pads, flame, engine bell, gold lower stage, cream cabin, window, antenna.
+  shapes.push(capsule(c(0.4), c(0.46), c(0.29), c(0.6), s(0.02), '#d4d8e6'));
+  shapes.push(capsule(c(0.6), c(0.46), c(0.71), c(0.6), s(0.02), '#d4d8e6'));
+  shapes.push(capsule(c(0.25), c(0.605), c(0.33), c(0.605), s(0.017), P.cream));
+  shapes.push(capsule(c(0.67), c(0.605), c(0.75), c(0.605), s(0.017), P.cream));
+  shapes.push(capsule(c(0.5), c(0.52), c(0.5), c(0.6), s(0.04), gradient([0.5, 0.5], [0.5, 0.62], P.lemon, P.coral), 0.9));
+  shapes.push(rrect(c(0.455), c(0.47), s(0.09), s(0.05), s(0.015), '#5b5f78'));
+  shapes.push(rrect(c(0.34), c(0.36), s(0.32), s(0.13), s(0.035), gradient([0.34, 0.36], [0.66, 0.49], P.lemon, P.tangerine)));
+  shapes.push(rrect(c(0.38), c(0.19), s(0.24), s(0.18), s(0.065), gradient([0.38, 0.19], [0.62, 0.37], P.white, '#d9def2')));
+  shapes.push(circle(c(0.5), c(0.275), s(0.045), P.sky));
+  shapes.push(highlight(c(0.5), c(0.275), s(0.045)));
+  shapes.push(capsule(c(0.59), c(0.2), c(0.65), c(0.12), s(0.011), P.cream));
+  shapes.push(circle(c(0.66), c(0.11), s(0.026), P.coral));
+  return shapes;
+}
+
 export const VARIANTS = {
   hub: hubArt,
   snake: snakeArt,
   coloring: coloringArt,
+  moon: moonArt,
 };
 
 /**
- * @param {'hub'|'snake'|'coloring'} variant
+ * @param {'hub'|'snake'|'coloring'|'moon'} variant
  * @param {{ maskable: boolean }} o
  */
 export function makeArt(variant, o) {

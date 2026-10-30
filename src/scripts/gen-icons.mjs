@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Generate PWA icons (PNG) and a favicon (SVG) from original code-drawn art.
-// Usage: node gen-icons.mjs --variant hub|snake|coloring --out public/icons [--favicon public/favicon.svg]
+// Usage: node gen-icons.mjs --variant hub|snake|coloring|moon --out public/icons [--favicon public/favicon.svg]
 import fs from 'node:fs';
 import path from 'node:path';
 import { ensureDir, parseArgs } from './lib/fsutil.mjs';
