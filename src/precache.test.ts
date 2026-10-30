@@ -78,7 +78,8 @@ describe('buildPrecacheManifest + renderServiceWorker', () => {
         }),
         fc.hexaString({ minLength: 4, maxLength: 8 }),
         (files, newHash) => {
-          const uniq = Array.from(new Map(files.map((f) => [f.path, f])).values());
+          // sw.js is excluded from the manifest by design, so it cannot move the version.
+          const uniq = Array.from(new Map(files.map((f) => [f.path, f])).values()).filter((f) => f.path !== 'sw.js');
           fc.pre(uniq.length > 0 && uniq[0]?.hash !== newHash);
           const before = buildPrecacheManifest(uniq, '/x/');
           const after = buildPrecacheManifest(
