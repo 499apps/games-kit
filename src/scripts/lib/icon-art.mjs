@@ -161,15 +161,69 @@ function moonArt(maskable) {
   return shapes;
 }
 
+function roverArt(maskable) {
+  const k = maskable ? 0.8 : 1;
+  const c = (v) => 0.5 + (v - 0.5) * k;
+  const s = (v) => v * k;
+  const shapes = [
+    // Dusky Mars sky: deep plum at the top, warm rose at the horizon, with a soft gloss.
+    rrect(0, 0, 1, 1, maskable ? 0 : 0.21, gradient([0, 0], [0, 1], '#2b1a4f', '#e07a6f')),
+    rrect(0.04, 0.04, 0.92, 0.42, maskable ? 0.1 : 0.18, P.white, 0.05),
+  ];
+  // First stars and a small moon.
+  for (const [x, y, r] of [
+    [0.18, 0.14, 0.012],
+    [0.32, 0.08, 0.009],
+    [0.88, 0.3, 0.01],
+    [0.12, 0.32, 0.008],
+  ]) {
+    shapes.push(circle(c(x), c(y), s(r), P.cream, 0.85));
+  }
+  shapes.push(circle(c(0.8), c(0.15), s(0.045), '#f6d8b8'));
+  shapes.push(circle(c(0.79), c(0.14), s(0.012), '#e2b994'));
+  // Far hill, then the butterscotch hill the rover stands on.
+  shapes.push(circle(c(0.1), c(1.02), s(0.38), '#b8573c', 0.9));
+  shapes.push(circle(c(0.5), c(1.32), s(0.68), gradient([0.3, 0.62], [0.7, 1], '#ffc078', '#e8803f')));
+  shapes.push(circle(c(0.3), c(0.85), s(0.03), '#d9733a'));
+  shapes.push(circle(c(0.74), c(0.9), s(0.04), '#d9733a'));
+  // Rocker-bogie legs.
+  const leg = '#cfd4e6';
+  shapes.push(capsule(c(0.29), c(0.62), c(0.41), c(0.53), s(0.017), leg));
+  shapes.push(capsule(c(0.5), c(0.62), c(0.41), c(0.53), s(0.017), leg));
+  shapes.push(capsule(c(0.71), c(0.62), c(0.6), c(0.53), s(0.017), leg));
+  // Three wheels (the side view of six), with silver hubs.
+  for (const x of [0.29, 0.5, 0.71]) {
+    shapes.push(circle(c(x), c(0.63), s(0.068), '#3a2f4f'));
+    shapes.push(circle(c(x), c(0.63), s(0.028), '#d9def2'));
+  }
+  // Glossy cream body with a coral stripe and a sky-blue solar deck.
+  shapes.push(rrect(c(0.24), c(0.41), s(0.52), s(0.12), s(0.04), gradient([0.24, 0.41], [0.76, 0.53], P.white, '#d9def2')));
+  shapes.push(rrect(c(0.24), c(0.48), s(0.52), s(0.024), s(0.01), P.coral));
+  shapes.push(rrect(c(0.27), c(0.375), s(0.46), s(0.045), s(0.018), gradient([0.27, 0.37], [0.73, 0.42], P.sky, P.lavender)));
+  shapes.push(highlight(c(0.36), c(0.45), s(0.06)));
+  // Antenna with a lemon tip.
+  shapes.push(capsule(c(0.32), c(0.38), c(0.29), c(0.27), s(0.01), P.cream));
+  shapes.push(circle(c(0.29), c(0.26), s(0.022), P.lemon));
+  // Mast and a friendly camera head with two round lenses.
+  shapes.push(capsule(c(0.66), c(0.38), c(0.66), c(0.22), s(0.018), leg));
+  shapes.push(rrect(c(0.58), c(0.13), s(0.17), s(0.1), s(0.04), gradient([0.58, 0.13], [0.75, 0.23], P.white, '#d9def2')));
+  shapes.push(circle(c(0.63), c(0.18), s(0.026), P.ink));
+  shapes.push(circle(c(0.7), c(0.18), s(0.026), P.ink));
+  shapes.push(circle(c(0.623), c(0.172), s(0.009), P.white));
+  shapes.push(circle(c(0.693), c(0.172), s(0.009), P.white));
+  return shapes;
+}
+
 export const VARIANTS = {
   hub: hubArt,
   snake: snakeArt,
   coloring: coloringArt,
   moon: moonArt,
+  rover: roverArt,
 };
 
 /**
- * @param {'hub'|'snake'|'coloring'|'moon'} variant
+ * @param {'hub'|'snake'|'coloring'|'moon'|'rover'} variant
  * @param {{ maskable: boolean }} o
  */
 export function makeArt(variant, o) {
