@@ -5,7 +5,7 @@
  * Environment:
  *   E2E_PORT              port of the server under test
  *   E2E_EXTERNAL_SERVER=1 do not start a server (run-e2e.mjs already started one)
- *   E2E_WORKERS           workers per Playwright process (default 50%)
+ *   E2E_WORKERS           workers per Playwright process (number or percentage, default 25%)
  *   E2E_BROWSERS          comma list of project names to run, e.g. "chromium,pixel"
  *   E2E_IPHONE_ENGINE     "chromium" runs the iPhone project on Chromium (when WebKit is missing)
  */
@@ -18,6 +18,21 @@ export const CHROMIUM_GL_ARGS: readonly string[] = [
   '--enable-unsafe-swiftshader',
   '--ignore-gpu-blocklist',
 ];
+
+/** Hardware WebGL for the frame-time test: real frames need the host GPU, not a rasteriser. */
+export function hardwareGlArgs(platform: string = process.platform): string[] {
+  const angle = platform === 'win32' ? 'd3d11' : platform === 'darwin' ? 'metal' : 'gl';
+  return ['--enable-gpu', `--use-angle=${angle}`, '--ignore-gpu-blocklist'];
+}
+
+/** E2E_WORKERS as Playwright expects it: a number ("4") or a percentage ("25%"). Default 25%. */
+export function parseWorkers(raw: string | undefined): number | string {
+  if (raw === undefined || raw.trim() === '') return '25%';
+  const v = raw.trim();
+  if (/^\d+%$/.test(v)) return v;
+  const n = Number(v);
+  return Number.isInteger(n) && n > 0 ? n : '25%';
+}
 
 export type KitProjectName = 'chromium' | 'firefox' | 'webkit' | 'iphone' | 'pixel';
 
@@ -92,7 +107,7 @@ export function kitPlaywrightConfig(
     fullyParallel: true,
     forbidOnly: true,
     retries: 0,
-    workers: env['E2E_WORKERS'] ?? '50%',
+    workers: parseWorkers(env['E2E_WORKERS']),
     timeout: 90_000,
     expect: {
       timeout: 20_000,

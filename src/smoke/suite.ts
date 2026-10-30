@@ -4,7 +4,8 @@
  * touch on phones), left menu, manifest + service worker, offline reload, frame-time budget,
  * clear-my-data and a visual baseline.
  */
-import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { chromium, expect, test, type Page, type TestInfo } from '@playwright/test';
+import { hardwareGlArgs } from './projects';
 import {
   checkClearData,
   checkLeftMenu,
@@ -85,7 +86,10 @@ export function defineSmokeSuite(targets: SmokeTarget[]): void {
         const csp = page.locator('meta[http-equiv="Content-Security-Policy"]');
         await expect(csp).toHaveCount(1);
         expect(await csp.getAttribute('content')).toContain("default-src 'self'");
-        await expect(page.locator('meta[name="referrer"]')).toHaveAttribute('content', 'no-referrer');
+        await expect(page.locator('meta[name="referrer"]')).toHaveAttribute(
+          'content',
+          'no-referrer',
+        );
         if (target.webgl) await expectCanvasRendered(page, testInfo);
         await guard.assertClean();
       });
@@ -128,7 +132,10 @@ export function defineSmokeSuite(targets: SmokeTarget[]): void {
 
       if (target.clearSelector) {
         const selector = target.clearSelector;
-        test('clear my data needs a long hold and wipes only g499 keys', async ({ page, baseURL }) => {
+        test('clear my data needs a long hold and wipes only g499 keys', async ({
+          page,
+          baseURL,
+        }) => {
           const { guard } = await open(page, baseURL, target);
           await checkClearData(page, selector);
           await guard.assertClean();
@@ -144,7 +151,10 @@ export function defineSmokeSuite(targets: SmokeTarget[]): void {
         await checkManifest(page, request, target.manifest);
         const controlled = await waitForServiceWorker(page);
         if (!controlled && !testInfo.project.name.match(/chromium|pixel/)) {
-          test.fixme(true, `service worker never took control in ${testInfo.project.name} on this host`);
+          test.fixme(
+            true,
+            `service worker never took control in ${testInfo.project.name} on this host`,
+          );
         }
         expect(controlled, 'service worker controls the page').toBe(true);
         const info = await serviceWorkerInfo(page);
@@ -157,7 +167,10 @@ export function defineSmokeSuite(targets: SmokeTarget[]): void {
         const { guard } = await open(page, baseURL, target);
         const controlled = await waitForServiceWorker(page);
         if (!controlled && !testInfo.project.name.match(/chromium|pixel/)) {
-          test.fixme(true, `service worker never took control in ${testInfo.project.name} on this host`);
+          test.fixme(
+            true,
+            `service worker never took control in ${testInfo.project.name} on this host`,
+          );
         }
         expect(controlled, 'service worker controls the page').toBe(true);
         await reloadOffline(page, context);
@@ -172,26 +185,38 @@ export function defineSmokeSuite(targets: SmokeTarget[]): void {
       });
 
       if (target.webgl) {
-        test('holds the frame-time budget', async ({ page, baseURL }, testInfo) => {
-          test.skip(!isDesktopChromium(testInfo), 'frame-time budget runs in desktop Chromium only');
-          await page.goto(`${target.path}?test=1`);
-          await waitForReady(page);
-          // Headless allowance: a software rasteriser starts at the low tier (the stage picks it
-          // too; &tier=low makes it explicit) and gets a looser budget. E2E_FPS_BUDGET_MS
-          // overrides both defaults. This is the only test with a continuous render loop.
-          const software = await isSoftwareGl(page);
-          const { guard } = await open(page, baseURL, target, `?test=1&live=1${software ? '&tier=low' : ''}`);
-          await page.waitForTimeout(1_500);
-          const frames = await measureFrameTimes(page, 2_000);
-          const budget = Number(process.env['E2E_FPS_BUDGET_MS'] ?? (software ? 50 : 20));
-          const med = medianOf(frames);
-          testInfo.annotations.push({
-            type: 'frame-time',
-            description: `median ${med.toFixed(1)} ms over ${frames.length} frames (budget ${budget} ms, software GL: ${software})`,
-          });
-          expect(frames.length).toBeGreaterThan(10);
-          expect(med).toBeLessThanOrEqual(budget);
-          await guard.assertClean();
+        test('holds the frame-time budget', async ({ baseURL }, testInfo) => {
+          test.skip(
+            !isDesktopChromium(testInfo),
+            'frame-time budget runs in desktop Chromium only',
+          );
+          // The other tests use deterministic software GL. This one measures real frames, so it
+          // launches its own Chromium on the host GPU. On a host without a GPU it skips, unless
+          // E2E_FPS_BUDGET_MS asks for a software measurement anyway.
+          const browser = await chromium.launch({ args: hardwareGlArgs() });
+          try {
+            const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, baseURL });
+            const { guard } = await open(page, baseURL, target, '?test=1&live=1');
+            const software = await isSoftwareGl(page);
+            const forced = process.env['E2E_FPS_BUDGET_MS'];
+            test.skip(
+              software && forced === undefined,
+              'no hardware GPU on this host (set E2E_FPS_BUDGET_MS to measure software GL)',
+            );
+            await page.waitForTimeout(1_500);
+            const frames = await measureFrameTimes(page, 2_000);
+            const budget = Number(forced ?? (software ? 50 : 20));
+            const med = medianOf(frames);
+            testInfo.annotations.push({
+              type: 'frame-time',
+              description: `median ${med.toFixed(1)} ms over ${frames.length} frames (budget ${budget} ms, software GL: ${software})`,
+            });
+            expect(frames.length).toBeGreaterThan(10);
+            expect(med).toBeLessThanOrEqual(budget);
+            await guard.assertClean();
+          } finally {
+            await browser.close();
+          }
         });
       }
 
