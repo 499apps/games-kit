@@ -37,7 +37,9 @@ export function checkOutputNames(relPaths) {
  */
 export function checkHtmlForLiquid(html, label = 'html') {
   const problems = [];
-  if (/^\uFEFF?\s*---/.test(html)) problems.push(`${label}: starts with YAML front matter`);
+  // Ignore a leading byte-order mark (U+FEFF) before looking for front matter.
+  const body = html.charCodeAt(0) === 0xfeff ? html.slice(1) : html;
+  if (/^\s*---/.test(body)) problems.push(`${label}: starts with YAML front matter`);
   if (html.includes('{{')) problems.push(`${label}: contains "{{"`);
   if (html.includes('{%')) problems.push(`${label}: contains "{%"`);
   return problems;

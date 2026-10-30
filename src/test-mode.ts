@@ -59,6 +59,12 @@ export function exposeTestApi(api: Partial<TestApi>): Partial<TestApi> {
   return merged;
 }
 
+/** Record whether WebGL started (smoke tests read data-g499-gl to decide on pixel checks). */
+export function markGl(available: boolean): void {
+  if (typeof document === 'undefined') return;
+  document.documentElement.setAttribute('data-g499-gl', available ? '1' : '0');
+}
+
 export function markReady(): void {
   if (typeof window === 'undefined') return;
   window.__g499 = { ...(window.__g499 ?? {}), ready: true };

@@ -16,3 +16,4 @@ export * from './fullscreen';
 export * from './csp';
 export * from './test-mode';
 export * from './shell';
+export * from './stage';
