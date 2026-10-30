@@ -19,6 +19,7 @@ interface G499TestWindow {
   __g499?: {
     ready?: boolean;
     step?: (frames: number) => void;
+    idle?: () => Promise<void>;
     state?: () => unknown;
   };
 }
@@ -75,9 +76,9 @@ export function guardPage(page: Page, context: BrowserContext, baseURL: string):
   };
 }
 
-/** Wait until the page called markReady(). */
+/** Wait until the page called markReady() (after its first frame is drawn). */
 export async function waitForReady(page: Page, timeout = 45_000): Promise<void> {
-  await page.waitForSelector('html[data-g499-ready="1"]', { state: 'attached', timeout });
+  await expect(page.locator('html')).toHaveAttribute('data-g499-ready', '1', { timeout });
 }
 
 /** True when the page started WebGL (data-g499-gl="1"). */
@@ -85,25 +86,22 @@ export async function hasWebgl(page: Page): Promise<boolean> {
   return (await page.getAttribute('html', 'data-g499-gl')) === '1';
 }
 
-/** Advance the frozen test clock by a number of frames. */
+/**
+ * Advance the frozen test clock by a number of frames and wait until they are consumed and
+ * drawn (the page draws on demand), plus one frame so the picture is on screen.
+ */
 export async function stepFrames(page: Page, frames: number): Promise<void> {
-  await page.evaluate((n) => {
-    const w = window as unknown as G499TestWindow;
-    w.__g499?.step?.(n);
+  await page.evaluate(async (n) => {
+    const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    const api = (window as unknown as G499TestWindow).__g499;
+    api?.step?.(n);
+    if (api?.idle) {
+      await api.idle();
+    } else {
+      for (let i = 0; i < 4; i++) await nextFrame();
+    }
+    await nextFrame();
   }, frames);
-  // Let a few animation frames run so the steps are consumed and rendered.
-  await page.evaluate(
-    () =>
-      new Promise<void>((resolve) => {
-        let left = 4;
-        const tick = () => {
-          left--;
-          if (left <= 0) resolve();
-          else requestAnimationFrame(tick);
-        };
-        requestAnimationFrame(tick);
-      }),
-  );
 }
 
 /** Read the page's test state object (window.__g499.state()). */
@@ -116,7 +114,14 @@ export async function readState<T = Record<string, unknown>>(page: Page): Promis
 
 /** Pixel statistics of the stage canvas, from a real screenshot (works in every engine). */
 export async function canvasStats(page: Page, selector = STAGE_SELECTOR): Promise<ImageStats> {
-  const shot = await page.locator(selector).first().screenshot({ animations: 'disabled' });
+  await page.evaluate(async () => {
+    const api = (window as unknown as G499TestWindow).__g499;
+    if (api?.idle) await api.idle();
+  });
+  const shot = await page
+    .locator(selector)
+    .first()
+    .screenshot({ animations: 'disabled', caret: 'hide', scale: 'css' });
   return imageStats(decodePng(shot), 4);
 }
 
@@ -235,13 +240,17 @@ export async function checkLeftMenu(page: Page, hasTouch: boolean): Promise<void
   for (const id of ['home', 'mute', 'privacy', 'clear']) {
     await expect(page.locator(`[data-menu-id="${id}"]`)).toBeVisible();
   }
-  // The mute toggle flips and persists under the g499: prefix.
+  // The mute toggle flips and persists under the g499: prefix. aria-pressed="true" means sound
+  // on, so the stored mute flag is its opposite.
   const mute = page.locator('[data-menu-id="mute"]');
   const before = await mute.getAttribute('aria-pressed');
+  expect(before === 'true' || before === 'false', 'mute aria-pressed').toBe(true);
+  const after = before === 'true' ? 'false' : 'true';
   await press(mute, hasTouch);
-  await expect(mute).not.toHaveAttribute('aria-pressed', before ?? '');
-  const stored = await page.evaluate(() => localStorage.getItem('g499:mute'));
-  expect(stored === 'true' || stored === 'false').toBe(true);
+  await expect(mute).toHaveAttribute('aria-pressed', after);
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem('g499:mute')), { timeout: 5_000 })
+    .toBe(after === 'true' ? 'false' : 'true');
   if (drawerMode) {
     await press(page.locator('.g499-rail-close'), hasTouch);
     await expect(rail).not.toHaveClass(/is-open/);
@@ -252,24 +261,47 @@ export async function checkLeftMenu(page: Page, hasTouch: boolean): Promise<void
 /**
  * Hold-to-confirm "clear my data": a short press does nothing, a long hold wipes every g499: key
  * and leaves other keys alone. Uses the keyboard so it works the same in every engine.
+ *
+ * The short press runs inside the page: key down, a 250 ms page timer, key up. Measured on the
+ * page clock, the release always comes before the 1200 ms hold timer, even when the main thread
+ * is slow. (Timed from the test runner, a busy page can see the release late and confirm.)
  */
 export async function checkClearData(page: Page, selector: string): Promise<void> {
-  await page.evaluate(() => {
+  const button = page.locator(selector).first();
+  await expect(button).toBeAttached();
+  const seeded = await page.evaluate(() => {
     localStorage.setItem('g499:smoke', '"1"');
     localStorage.setItem('not-ours', 'keep');
+    return localStorage.getItem('g499:smoke');
   });
-  const button = page.locator(selector).first();
+  expect(seeded, 'seeded g499:smoke').toBe('"1"');
+
+  // Short press: cancelled, nothing cleared.
+  await page.evaluate(async (sel) => {
+    const el = document.querySelector<HTMLElement>(sel);
+    if (!el) throw new Error(`no element ${sel}`);
+    el.focus();
+    const init: KeyboardEventInit = { code: 'Space', key: ' ', bubbles: true, cancelable: true };
+    el.dispatchEvent(new KeyboardEvent('keydown', init));
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    el.dispatchEvent(new KeyboardEvent('keyup', init));
+  }, selector);
+  await expect(button).not.toHaveClass(/is-holding/);
+  // Wait past the hold time so a late confirm would show up.
+  await page.waitForTimeout(1_500);
+  expect(await page.evaluate(() => localStorage.getItem('g499:smoke')), 'after a short press').toBe(
+    '"1"',
+  );
+
+  // Long hold with the real keyboard: confirmed, g499 keys wiped, other keys kept.
   await button.focus();
   await page.keyboard.down('Space');
-  await page.waitForTimeout(250);
-  await page.keyboard.up('Space');
-  expect(await page.evaluate(() => localStorage.getItem('g499:smoke'))).toBe('"1"');
-  await button.focus();
-  await page.keyboard.down('Space');
+  // The key reached the button (is-done follows when the hold already completed).
+  await expect(button).toHaveClass(/is-holding|is-done/);
   await page.waitForTimeout(1_600);
   await page.keyboard.up('Space');
   await expect
-    .poll(() => page.evaluate(() => localStorage.getItem('g499:smoke')), { timeout: 5_000 })
+    .poll(() => page.evaluate(() => localStorage.getItem('g499:smoke')), { timeout: 10_000 })
     .toBeNull();
   expect(await page.evaluate(() => localStorage.getItem('not-ours'))).toBe('keep');
   await page.evaluate(() => localStorage.removeItem('not-ours'));
@@ -438,6 +470,12 @@ export async function expectScreenshot(
   name: string,
   mask: Locator[] = [],
 ): Promise<void> {
+  // A stable frozen frame: every queued step drawn, fonts loaded, then the shot.
+  await page.evaluate(async () => {
+    const api = (window as unknown as G499TestWindow).__g499;
+    if (api?.idle) await api.idle();
+    await document.fonts.ready;
+  });
   const file = testInfo.snapshotPath(name);
   if (!fs.existsSync(file)) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -445,5 +483,10 @@ export async function expectScreenshot(
     testInfo.annotations.push({ type: 'baseline-created', description: file });
     return;
   }
-  await expect(page).toHaveScreenshot(name, { mask });
+  await expect(page).toHaveScreenshot(name, {
+    mask,
+    animations: 'disabled',
+    caret: 'hide',
+    scale: 'css',
+  });
 }

@@ -18,14 +18,15 @@ Shared toolkit for **499apps Games**, the privacy-first games site for kids at
 | `renderer.ts`, `quality.ts` | three.js renderer, bloom, vignette, ACES tone mapping, adaptive quality tiers |
 | `scene-helpers.ts`, `particles.ts` | Studio lights, candy materials, playroom, easing, seeded particle bursts |
 | `stage.ts` | Boot sequence for 3D pages: canvas, renderer or fallback, loop, input, test API |
-| `audio.ts` | WebAudio synthesiser with a persisted mute |
+| `loop.ts` | Render loop: continuous when live, on demand with the frozen test clock (`stage.requestRender()`) |
+| `audio.ts` | WebAudio synthesiser with a persisted mute. Silent in test mode. Audio errors degrade to silence |
 | `input.ts` | Keyboard, touch (tap and swipe), pointer and gamepad mapped to actions |
 | `storage.ts` | `g499:` storage and `clearAllUserData` |
 | `menu.ts`, `shell.ts`, `icons.ts` | Left rail and drawer menu, app shell, original SVG icons |
 | `sw-register.ts` | Service worker registration (standalone or assembled) |
 | `prng.ts` | Seeded random numbers for deterministic replays |
 | `csp.ts` | The Content-Security-Policy and PWA head tags |
-| `test-mode.ts` | `?test=1` hooks: frozen clock, fixed seed, `window.__g499` |
+| `test-mode.ts` | `?test=1` hooks: frozen clock, fixed seed, on-demand frames, silent audio, `window.__g499` |
 | `vite-kit.ts` | Vite build options: safe output names, Liquid guard, assembled manifest link |
 | `smoke/` | Playwright projects, helpers and the shared smoke suite |
 | `scripts/` | `kit-sync`, precache generator, icon generator, `scan-secrets`, CI runners, static server |

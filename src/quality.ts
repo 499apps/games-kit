@@ -84,6 +84,35 @@ export function probeTier(info: DeviceInfo): Tier {
   return 'medium';
 }
 
+/** Renderer strings of software rasterisers (headless browsers, VMs, CI hosts without a GPU). */
+export const SOFTWARE_GPU_PATTERN = /swiftshader|llvmpipe|lavapipe|softpipe|software|basic render/i;
+
+/** True when the WebGL renderer string names a software rasteriser. */
+export function isSoftwareGpu(name: string | null | undefined): boolean {
+  return typeof name === 'string' && SOFTWARE_GPU_PATTERN.test(name);
+}
+
+export interface StartTierInput {
+  /** ?tier= from the URL; always wins. */
+  override: Tier | null;
+  /** Frozen test clock: a fixed tier keeps screenshots stable on one host. */
+  frozen: boolean;
+  /** WebGL renderer string from probeGpu(). */
+  gpuName: string;
+  device: DeviceInfo;
+}
+
+/**
+ * Pick the first tier. Software GL starts at 'low' (no bloom, no shadows, pixel ratio 1)
+ * because every pass runs on the CPU there.
+ */
+export function pickStartTier(i: StartTierInput): Tier {
+  if (i.override) return i.override;
+  if (isSoftwareGpu(i.gpuName)) return 'low';
+  if (i.frozen) return 'medium';
+  return probeTier(i.device);
+}
+
 export function median(values: readonly number[]): number {
   if (values.length === 0) return 0;
   const sorted = values.slice().sort((a, b) => a - b);

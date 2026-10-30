@@ -5,10 +5,13 @@ import {
   TIERS,
   TIER_ORDER,
   higherTier,
+  isSoftwareGpu,
   isTier,
   lowerTier,
   median,
+  pickStartTier,
   probeTier,
+  type DeviceInfo,
 } from './quality';
 
 describe('tiers', () => {
@@ -48,6 +51,68 @@ describe('tiers', () => {
     expect(probeTier({ cores: 8, memoryGb: 8, dpr: 1, isMobile: false, width: 1920, height: 1080 })).toBe('high');
     expect(probeTier({ cores: 8, memoryGb: 8, dpr: 3, isMobile: true, width: 390, height: 844 })).toBe('high');
     expect(probeTier({ cores: 4, memoryGb: 4, dpr: 2, isMobile: true, width: 390, height: 844 })).toBe('medium');
+  });
+});
+
+describe('software GPU detection', () => {
+  const software = [
+    'ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)',
+    'Google SwiftShader',
+    'llvmpipe (LLVM 15.0.7, 256 bits)',
+    'Mesa/X.org llvmpipe',
+    'ANGLE (Microsoft, Microsoft Basic Render Driver Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    'Software Rasterizer',
+    'lavapipe',
+  ];
+  const hardware = [
+    'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    'Apple GPU',
+    'Mali-G78',
+    'Adreno (TM) 740',
+    'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    'WebKit WebGL',
+    '',
+  ];
+
+  it('spots software rasterisers', () => {
+    for (const name of software) expect(isSoftwareGpu(name), name).toBe(true);
+    for (const name of hardware) expect(isSoftwareGpu(name), name).toBe(false);
+    expect(isSoftwareGpu(null)).toBe(false);
+    expect(isSoftwareGpu(undefined)).toBe(false);
+  });
+
+  const strongDesktop: DeviceInfo = { cores: 16, memoryGb: 16, dpr: 1, isMobile: false, width: 1920, height: 1080 };
+
+  it('starts software GL at low, unless ?tier= overrides', () => {
+    for (const name of software) {
+      expect(pickStartTier({ override: null, frozen: false, gpuName: name, device: strongDesktop })).toBe('low');
+      expect(pickStartTier({ override: null, frozen: true, gpuName: name, device: strongDesktop })).toBe('low');
+      expect(pickStartTier({ override: 'high', frozen: true, gpuName: name, device: strongDesktop })).toBe('high');
+    }
+  });
+
+  it('keeps the old choice on a real GPU', () => {
+    const gpu = hardware[0] as string;
+    expect(pickStartTier({ override: null, frozen: true, gpuName: gpu, device: strongDesktop })).toBe('medium');
+    expect(pickStartTier({ override: null, frozen: false, gpuName: gpu, device: strongDesktop })).toBe(
+      probeTier(strongDesktop),
+    );
+    expect(pickStartTier({ override: 'low', frozen: false, gpuName: gpu, device: strongDesktop })).toBe('low');
+  });
+
+  it('always returns a valid tier', () => {
+    fc.assert(
+      fc.property(
+        fc.option(fc.constantFrom<'low' | 'medium' | 'high'>('low', 'medium', 'high'), { nil: null }),
+        fc.boolean(),
+        fc.string(),
+        (override, frozen, gpuName) => {
+          const t = pickStartTier({ override, frozen, gpuName, device: strongDesktop });
+          expect(isTier(t)).toBe(true);
+          if (override) expect(t).toBe(override);
+        },
+      ),
+    );
   });
 });
 

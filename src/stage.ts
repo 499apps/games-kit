@@ -10,9 +10,10 @@ import {
   createClock,
   type GameClock,
 } from './lifecycle';
+import { createLoop, type Loop } from './loop';
 import { createRng, type Rng } from './prng';
-import { probeTier, type DeviceInfo, type Tier } from './quality';
-import { createKitRenderer, createLoop, type KitRenderer, type KitRendererOptions, type Loop } from './renderer';
+import { isSoftwareGpu, pickStartTier, type DeviceInfo, type Tier } from './quality';
+import { createKitRenderer, probeGpu, type KitRenderer, type KitRendererOptions } from './renderer';
 import { exposeTestApi, markGl, markReady, type TestApi, type TestModeState } from './test-mode';
 
 export interface StageOptions {
@@ -42,8 +43,17 @@ export interface Stage {
   readonly rng: Rng;
   readonly input: InputManager;
   readonly tier: Tier;
+  /** WebGL renderer string ('' without WebGL). */
+  readonly gpu: string;
+  /** True on a software rasteriser (SwiftShader, llvmpipe ...): the stage starts at 'low'. */
+  readonly software: boolean;
   /** Start the render loop. Does nothing without WebGL. */
   run(hooks: StageHooks): void;
+  /**
+   * Ask for a new frame after page code changed what the canvas shows (hover, menu, state).
+   * Needed in frozen test mode, where frames are drawn on demand. Harmless when live.
+   */
+  requestRender(): void;
   /** Expose window.__g499 (with page state) and mark the page ready after the first frames. */
   ready(state: () => unknown, extra?: Partial<TestApi>): void;
   dispose(): void;
@@ -78,7 +88,14 @@ export function createStage(o: StageOptions): Stage {
   canvas.tabIndex = -1;
   o.host.append(canvas);
 
-  const tier: Tier = o.testMode.tier ?? (o.testMode.frozen ? 'medium' : probeTier(readDeviceInfo()));
+  const gpu = probeGpu();
+  const software = gpu.available && isSoftwareGpu(gpu.name);
+  const tier: Tier = pickStartTier({
+    override: o.testMode.tier,
+    frozen: o.testMode.frozen,
+    gpuName: gpu.name,
+    device: readDeviceInfo(),
+  });
   const clock = createClock({ frozen: o.testMode.frozen });
   const seed = o.testMode.enabled ? o.testMode.seed : Math.floor(Math.random() * 0xffffffff);
   const rng = createRng(seed);
@@ -90,6 +107,7 @@ export function createStage(o: StageOptions): Stage {
     container: o.host,
     tier,
     reducedMotion: o.reducedMotion,
+    available: gpu.available,
   });
   markGl(kit !== null);
 
@@ -110,10 +128,13 @@ export function createStage(o: StageOptions): Stage {
   const offs: Array<() => void> = [];
   let disposed = false;
 
+  const requestRender = () => loop?.requestRender();
+
   const doResize = () => {
     if (!kit) return;
     kit.resize();
     hooks?.onResize?.(kit.width, kit.height);
+    requestRender();
   };
 
   const dispose = () => {
@@ -139,6 +160,8 @@ export function createStage(o: StageOptions): Stage {
     rng,
     input,
     tier,
+    gpu: gpu.name,
+    software,
     run(h) {
       hooks = h;
       if (!kit || disposed) return;
@@ -152,6 +175,9 @@ export function createStage(o: StageOptions): Stage {
         },
         onTierChange: (t) => h.onTierChange?.(t),
       });
+      // Any action can change the picture. In frozen mode gamepads are polled only while a
+      // frame runs (tests use the keyboard and touch).
+      offs.push(input.on(() => requestRender()));
       offs.push(onResize(doResize));
       offs.push(
         onVisibilityChange((hidden) => {
@@ -163,13 +189,21 @@ export function createStage(o: StageOptions): Stage {
       doResize();
       loop.start();
     },
+    requestRender,
     ready(state, extra) {
       exposeTestApi({
         version: 'g499',
         seed: rng.seed,
         tier,
         frozen: clock.frozen,
-        step: (frames: number) => clock.step(frames),
+        gpu: gpu.name,
+        software,
+        step: (frames: number) => {
+          clock.step(frames);
+          requestRender();
+        },
+        idle: () => (loop ? loop.idle() : Promise.resolve()),
+        renders: () => (loop ? loop.renders : 0),
         sample: () => (kit ? kit.sampleCanvasPixels() : null),
         frameTimes: () => (loop ? loop.frameTimes.slice() : []),
         state,
@@ -179,8 +213,10 @@ export function createStage(o: StageOptions): Stage {
         markReady();
         return;
       }
-      // Mark ready after two frames so the first picture is on screen.
-      requestAnimationFrame(() => requestAnimationFrame(() => markReady()));
+      // Mark ready once the first picture is drawn, plus one frame so it is on screen.
+      const onScreen = () => requestAnimationFrame(() => markReady());
+      if (loop) void loop.idle().then(onScreen);
+      else requestAnimationFrame(onScreen);
     },
     dispose,
   };

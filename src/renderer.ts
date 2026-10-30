@@ -9,9 +9,8 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { FrameMonitor, TIERS, type QualitySettings, type Tier } from './quality';
+import { TIERS, type QualitySettings, type Tier } from './quality';
 import { lighting, palette } from './theme';
-import type { GameClock } from './lifecycle';
 import { disposeObject } from './scene-helpers';
 
 const VignetteShader = {
@@ -52,6 +51,8 @@ export interface KitRendererOptions {
   bloom?: { strength: number; radius: number; threshold: number };
   vignette?: number;
   fov?: number;
+  /** Result of an earlier probeGpu(); skips a second WebGL probe context. */
+  available?: boolean;
 }
 
 export interface PixelSample {
@@ -73,40 +74,68 @@ export interface KitRenderer {
   shadowLights: THREE.Light[];
   setTier(tier: Tier): void;
   resize(): void;
+  /** Draw one frame now. The loop calls this; pages use requestRender() instead. */
   render(): void;
+  /** Ask the loop for a frame (needed in frozen test mode, where frames are on demand). */
+  requestRender(): void;
+  /** Used by createLoop to receive requestRender() calls. */
+  setRenderScheduler(fn: (() => void) | null): void;
+  /** Reads pixels back. Only call it from tests: it stalls the GPU. */
   sampleCanvasPixels(step?: number): PixelSample;
   dispose(): void;
 }
 
-/** True when a WebGL2 context can be created (no console noise when it cannot). */
-export function webglAvailable(): boolean {
-  if (typeof document === 'undefined') return false;
+function readGpuName(gl: WebGLRenderingContext | WebGL2RenderingContext): string {
   try {
-    const canvas = document.createElement('canvas');
-    const gl = canvas.getContext('webgl2', { failIfMajorPerformanceCaveat: false });
-    if (!gl) return false;
-    gl.getExtension('WEBGL_lose_context')?.loseContext();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Reports the unmasked renderer string when available (used by tests to spot software GL). */
-export function describeGpu(renderer: THREE.WebGLRenderer): string {
-  try {
-    const gl = renderer.getContext();
+    const plain = String(gl.getParameter(gl.RENDERER) ?? '');
+    // Chromium and WebKit mask RENDERER; Firefox does not (and warns about the extension).
+    if (plain && !/^webkit webgl$/i.test(plain)) return plain;
     const ext = gl.getExtension('WEBGL_debug_renderer_info');
-    const unmasked = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
-    const plain = String(gl.getParameter(gl.RENDERER));
+    const unmasked = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) ?? '') : '';
     return unmasked || plain;
   } catch {
     return 'unknown';
   }
 }
 
+export interface GpuProbe {
+  /** True when a WebGL2 context can be created. */
+  available: boolean;
+  /** Renderer string (unmasked when allowed), '' when WebGL is unavailable. */
+  name: string;
+}
+
+/** One short-lived WebGL2 context: is WebGL there, and which GPU (or rasteriser) runs it. */
+export function probeGpu(): GpuProbe {
+  if (typeof document === 'undefined') return { available: false, name: '' };
+  try {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl2', { failIfMajorPerformanceCaveat: false });
+    if (!gl) return { available: false, name: '' };
+    const name = readGpuName(gl);
+    gl.getExtension('WEBGL_lose_context')?.loseContext();
+    return { available: true, name };
+  } catch {
+    return { available: false, name: '' };
+  }
+}
+
+/** True when a WebGL2 context can be created (no console noise when it cannot). */
+export function webglAvailable(): boolean {
+  return probeGpu().available;
+}
+
+/** Reports the unmasked renderer string when available (used to spot software GL). */
+export function describeGpu(renderer: THREE.WebGLRenderer): string {
+  try {
+    return readGpuName(renderer.getContext());
+  } catch {
+    return 'unknown';
+  }
+}
+
 export function createKitRenderer(o: KitRendererOptions): KitRenderer | null {
-  if (!webglAvailable()) return null;
+  if (!(o.available ?? webglAvailable())) return null;
   let settings: QualitySettings = TIERS[o.tier ?? 'medium'];
   let renderer: THREE.WebGLRenderer;
   try {
@@ -199,6 +228,9 @@ export function createKitRenderer(o: KitRendererOptions): KitRenderer | null {
   applyTier();
   resize();
 
+  let scheduler: (() => void) | null = null;
+  const requestRender = () => scheduler?.();
+
   const kit: KitRenderer = {
     renderer,
     scene,
@@ -220,11 +252,17 @@ export function createKitRenderer(o: KitRendererOptions): KitRenderer | null {
       settings = TIERS[tier];
       applyTier();
       resize();
+      requestRender();
     },
     resize,
     render() {
       composer.render();
     },
+    requestRender,
+    setRenderScheduler(fn) {
+      scheduler = fn;
+    },
+    // Never called per frame: only window.__g499.sample() in tests reads pixels back.
     sampleCanvasPixels(step = 8) {
       composer.render();
       const gl = renderer.getContext();
@@ -251,6 +289,7 @@ export function createKitRenderer(o: KitRendererOptions): KitRenderer | null {
       return { total, distinct: counts.size, nonBackground: total - mode };
     },
     dispose() {
+      scheduler = null;
       disposeObject(scene);
       envTexture.dispose();
       bloomPass.dispose();
@@ -264,85 +303,3 @@ export function createKitRenderer(o: KitRendererOptions): KitRenderer | null {
   return kit;
 }
 
-export interface LoopOptions {
-  kit: KitRenderer;
-  clock: GameClock;
-  update: (dt: number, elapsed: number) => void;
-  /** Adjust the quality tier from measured frame times (off in frozen test mode). */
-  adaptive?: boolean;
-  monitor?: FrameMonitor;
-  onTierChange?: (tier: Tier) => void;
-}
-
-export interface Loop {
-  start(): void;
-  stop(): void;
-  pause(): void;
-  resume(): void;
-  readonly running: boolean;
-  readonly paused: boolean;
-  /** Last real frame durations in ms (up to 240). */
-  readonly frameTimes: number[];
-}
-
-export function createLoop(o: LoopOptions): Loop {
-  const monitor = o.monitor ?? new FrameMonitor();
-  const frameTimes: number[] = [];
-  let handle = 0;
-  let running = false;
-  let paused = false;
-  let lastReal: number | null = null;
-
-  const frame = (now: number) => {
-    if (!running || paused) return;
-    handle = requestAnimationFrame(frame);
-    const realDt = lastReal === null ? 0 : now - lastReal;
-    lastReal = now;
-    if (realDt > 0) {
-      frameTimes.push(realDt);
-      if (frameTimes.length > 240) frameTimes.shift();
-      if (o.adaptive && !o.clock.frozen) {
-        const next = monitor.push(realDt, o.kit.settings.tier);
-        if (next) {
-          o.kit.setTier(next);
-          o.onTierChange?.(next);
-        }
-      }
-    }
-    const dt = o.clock.tick(now);
-    o.update(dt, o.clock.elapsed);
-    o.kit.render();
-  };
-
-  return {
-    get running() {
-      return running;
-    },
-    get paused() {
-      return paused;
-    },
-    frameTimes,
-    start() {
-      if (running) return;
-      running = true;
-      paused = false;
-      lastReal = null;
-      handle = requestAnimationFrame(frame);
-    },
-    stop() {
-      running = false;
-      cancelAnimationFrame(handle);
-    },
-    pause() {
-      if (!running || paused) return;
-      paused = true;
-      cancelAnimationFrame(handle);
-    },
-    resume() {
-      if (!running || !paused) return;
-      paused = false;
-      lastReal = null;
-      handle = requestAnimationFrame(frame);
-    },
-  };
-}

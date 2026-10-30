@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Run the Playwright suite, optionally in N concurrent shards, against one shared server.
 // Usage: node run-e2e.mjs --config playwright.config.ts --server preview|site [--port 4173] [--root site]
-// Env:  E2E_SHARDS (default 2), E2E_WORKERS (per shard; default 50% / shards), E2E_BROWSERS
+// Env:  E2E_SHARDS (default 2), E2E_WORKERS (per shard; default max(1, floor(cpus * 0.25 / shards))), E2E_BROWSERS
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -51,10 +51,12 @@ async function startServer() {
   console.log(`[e2e] server ready at ${url}`);
 }
 
+// Software WebGL (SwiftShader / llvmpipe) runs every pass on the CPU, so each worker can use
+// several cores. Default: a quarter of the logical CPUs, split across the shards.
 function workersPerShard() {
   if (process.env.E2E_WORKERS) return process.env.E2E_WORKERS;
   const cpus = Math.max(1, os.cpus().length);
-  return String(Math.max(1, Math.floor((cpus * 0.5) / shards)));
+  return String(Math.max(1, Math.floor((cpus * 0.25) / shards)));
 }
 
 async function runShards() {
@@ -69,6 +71,7 @@ async function runShards() {
       env: {
         PLAYWRIGHT_JSON_OUTPUT_NAME: jsonFile,
         E2E_EXTERNAL_SERVER: '1',
+        E2E_SHARD: String(i),
         E2E_PORT: String(port),
         FORCE_COLOR: '1',
       },

@@ -101,7 +101,8 @@ export function kitPlaywrightConfig(
     // Baselines are committed per project and platform.
     snapshotPathTemplate: '{testDir}/screenshots/{projectName}-{platform}/{arg}{ext}',
     reporter: [['list']],
-    outputDir: 'test-results',
+    // Each concurrent shard needs its own output folder, or their artifacts collide.
+    outputDir: env['E2E_SHARD'] ? `test-results/shard-${env['E2E_SHARD']}` : 'test-results',
     use: {
       baseURL: `http://${host}:${port}`,
       serviceWorkers: 'allow',

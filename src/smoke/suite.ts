@@ -110,8 +110,12 @@ export function defineSmokeSuite(targets: SmokeTarget[]): void {
               await stepFrames(page, 10);
             }
           }
-          const after = await readState<{ actions?: number }>(page);
-          expect(after.actions ?? 0).toBeGreaterThan(before.actions ?? 0);
+          await expect
+            .poll(async () => (await readState<{ actions?: number }>(page)).actions ?? 0, {
+              message: 'input reached the game',
+              timeout: 10_000,
+            })
+            .toBeGreaterThan(before.actions ?? 0);
           await guard.assertClean();
         });
       }
@@ -172,8 +176,9 @@ export function defineSmokeSuite(targets: SmokeTarget[]): void {
           test.skip(!isDesktopChromium(testInfo), 'frame-time budget runs in desktop Chromium only');
           await page.goto(`${target.path}?test=1`);
           await waitForReady(page);
-          // Headless allowance: on a software rasteriser start at the low tier and use a looser
-          // budget (E2E_FPS_BUDGET_MS overrides both defaults).
+          // Headless allowance: a software rasteriser starts at the low tier (the stage picks it
+          // too; &tier=low makes it explicit) and gets a looser budget. E2E_FPS_BUDGET_MS
+          // overrides both defaults. This is the only test with a continuous render loop.
           const software = await isSoftwareGl(page);
           const { guard } = await open(page, baseURL, target, `?test=1&live=1${software ? '&tier=low' : ''}`);
           await page.waitForTimeout(1_500);

@@ -79,6 +79,8 @@ export interface GameClock {
   readonly dt: number;
   readonly frame: number;
   readonly frozen: boolean;
+  /** Fixed steps queued by step() that tick() has not consumed yet (always 0 when live). */
+  readonly pending: number;
   /** Advance using a real timestamp (ms). Returns dt in seconds. */
   tick(nowMs: number): number;
   /** Advance a frozen clock by a number of fixed frames (1/60 s each). */
@@ -111,6 +113,9 @@ export function createClock(opts: ClockOptions = {}): GameClock {
     get frame() {
       return frame;
     },
+    get pending() {
+      return pendingSteps;
+    },
     frozen,
     tick(nowMs) {
       frame++;
@@ -135,7 +140,9 @@ export function createClock(opts: ClockOptions = {}): GameClock {
       return dt;
     },
     step(frames) {
-      pendingSteps += Math.max(0, Math.floor(frames));
+      // A live clock follows real time, so fixed steps do not apply.
+      if (!frozen) return;
+      pendingSteps += Math.max(0, Math.floor(Number.isFinite(frames) ? frames : 0));
     },
   };
 }

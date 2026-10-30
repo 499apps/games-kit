@@ -1,6 +1,8 @@
 /**
- * Test hooks. Pages opened with "?test=1" freeze the clock, use a fixed seed and expose a
- * small API on window.__g499 so smoke tests can step frames and read state deterministically.
+ * Test hooks. Pages opened with "?test=1" freeze the clock, use a fixed seed, draw frames only
+ * on demand, keep audio silent (no AudioContext) and expose a small API on window.__g499 so
+ * smoke tests can step frames and read state deterministically. "&live=1" keeps the clock and
+ * the render loop running (frame-time test).
  */
 import { isTier, type Tier } from './quality';
 
@@ -39,7 +41,16 @@ export interface TestApi {
   seed: number;
   tier: Tier;
   frozen: boolean;
+  /** WebGL renderer string and whether it is a software rasteriser. */
+  gpu: string;
+  software: boolean;
+  /** Queue fixed frames on the frozen clock; they run and draw in the next frame. */
   step: (frames: number) => void;
+  /** Resolves when every queued step is consumed and drawn. */
+  idle: () => Promise<void>;
+  /** Frames drawn so far (frozen mode draws only on demand). */
+  renders: () => number;
+  /** Reads canvas pixels back (stalls the GPU, so only on request, never per frame). */
   sample: () => { total: number; distinct: number; nonBackground: number } | null;
   frameTimes: () => number[];
   state?: () => unknown;

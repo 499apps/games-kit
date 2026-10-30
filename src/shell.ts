@@ -45,7 +45,8 @@ export function createShell(o: ShellOptions): Shell {
   document.body.classList.add(`g499-kind-${o.kind}`);
   const testMode = readTestMode();
   if (testMode.enabled) document.documentElement.classList.add('g499-test');
-  const synth = createSynth(storage);
+  // Test pages never touch a real audio device (headless hosts have none).
+  const synth = createSynth(storage, { silent: testMode.enabled });
   const detachUnlock = attachAutoUnlock(synth);
   const assembled = isAssembledBuild();
   const reducedMotion = prefersReducedMotion();
