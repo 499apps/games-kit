@@ -17,6 +17,14 @@ const siteRoot = String(args.root ?? 'site');
 const readyPath = String(args['ready-path'] ?? '/');
 const shards = Math.max(1, Math.min(8, Number(process.env.E2E_SHARDS ?? 2)));
 const passthrough = args._;
+// The frame-time test measures real frames, so it runs alone after the shards, not next to
+// CPU-heavy software-GL workers.
+const PERF_GREP = 'frame-time budget';
+const browsers = (process.env.E2E_BROWSERS ?? '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+const runPerf = browsers.length === 0 || browsers.includes('chromium');
 
 const resultsDir = path.resolve('e2e-results');
 ensureDir(resultsDir);
@@ -38,9 +46,15 @@ async function startServer() {
     return;
   }
   if (serverKind === 'site') {
-    server = spawnTask('node', [staticServer, '--root', siteRoot, '--port', String(port)], { capture: true });
+    server = spawnTask('node', [staticServer, '--root', siteRoot, '--port', String(port)], {
+      capture: true,
+    });
   } else {
-    server = spawnTask('pnpm', ['exec', 'vite', 'preview', '--port', String(port), '--strictPort'], { capture: true });
+    server = spawnTask(
+      'pnpm',
+      ['exec', 'vite', 'preview', '--port', String(port), '--strictPort'],
+      { capture: true },
+    );
   }
   const up = await waitForHttp(url, 60000);
   if (!up) {
@@ -63,7 +77,18 @@ async function runShards() {
   const tasks = [];
   for (let i = 1; i <= shards; i++) {
     const jsonFile = path.join(resultsDir, `shard-${i}.json`);
-    const pwArgs = ['exec', 'playwright', 'test', '--config', config, '--reporter=list,json', '--workers', workersPerShard()];
+    const pwArgs = [
+      'exec',
+      'playwright',
+      'test',
+      '--config',
+      config,
+      '--reporter=list,json',
+      '--workers',
+      workersPerShard(),
+      '--grep-invert',
+      PERF_GREP,
+    ];
     if (shards > 1) pwArgs.push(`--shard=${i}/${shards}`);
     pwArgs.push(...passthrough);
     const task = spawnTask('pnpm', pwArgs, {
@@ -85,6 +110,42 @@ async function runShards() {
       console.log(`\n[e2e] ── shard ${t.i}/${shards} output ──`);
       process.stdout.write(t.task.output());
     }
+  }
+  if (runPerf) {
+    const jsonFile = path.join(resultsDir, 'perf.json');
+    const task = spawnTask(
+      'pnpm',
+      [
+        'exec',
+        'playwright',
+        'test',
+        '--config',
+        config,
+        '--reporter=list,json',
+        '--workers',
+        '1',
+        '--project',
+        'chromium',
+        '--grep',
+        PERF_GREP,
+        ...passthrough,
+      ],
+      {
+        capture: true,
+        env: {
+          PLAYWRIGHT_JSON_OUTPUT_NAME: jsonFile,
+          E2E_EXTERNAL_SERVER: '1',
+          E2E_PORT: String(port),
+          E2E_SHARD: 'perf',
+          FORCE_COLOR: '1',
+        },
+      },
+    );
+    const code = await task.done;
+    console.log('\n[e2e] -- frame-time pass (alone) --');
+    process.stdout.write(task.output());
+    tasks.push({ i: 'perf', task, jsonFile });
+    codes.push(code);
   }
   return { tasks, codes };
 }
@@ -115,7 +176,9 @@ try {
   const { tasks, codes } = await runShards();
   const merged = mergeResults(tasks);
   exitCode = codes.some((c) => c !== 0) ? 1 : 0;
-  console.log(`\n[e2e] ${merged.passed} passed, ${merged.failed} failed, ${merged.flaky} flaky, ${merged.skipped} skipped across ${shards} shard(s) in ${formatMs(Date.now() - t0)}`);
+  console.log(
+    `\n[e2e] ${merged.passed} passed, ${merged.failed} failed, ${merged.flaky} flaky, ${merged.skipped} skipped across ${shards} shard(s) in ${formatMs(Date.now() - t0)}`,
+  );
   console.log(`E2E_SUMMARY ${JSON.stringify(merged)}`);
 } finally {
   if (server) killTree(server.child);
